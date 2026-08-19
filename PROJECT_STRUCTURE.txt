@@ -1,0 +1,15 @@
+SabaiBooksQt/
+├── CMakeLists.txt
+├── main.cpp
+├── mainwindow.h
+├── mainwindow.cpp
+├── resources.qrc
+├── data.json
+├── README.md
+└── assets/
+    ├── free/
+    └── paid/
+
+MainWindow is the main Qt Widgets class.
+The web project's JSON book data is reused locally.
+Lecture PDFs are shipped as desktop assets.
