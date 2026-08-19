@@ -62,8 +62,11 @@ const QString TEAL = "#2F7A6F";
 
 // Paste the OAuth 2.0 Client ID from Google Cloud here.
 // Create it as an application type: Desktop app.
-const QString clientId = "YOUR_GOOGLE_CLIENT_ID";
-const QString clientSecret = "YOUR_GOOGLE_CLIENT_SECRET";
+const QString GOOGLE_CLIENT_ID =
+    "......";
+
+const QString GOOGLE_CLIENT_SECRET =
+    "GOCSPX-......";
 
 // URL of the small backend that holds the Tola Saint secret key and
 // creates/checks payments on our behalf. Point this at your deployed
@@ -833,30 +836,87 @@ void MainWindow::showLectureRatingDialog(const Lecture &lecture)
     auto *rating = new QComboBox; rating->addItems({"1", "2", "3", "4", "5"}); v->addWidget(rating);
     auto *comment = new QPlainTextEdit; comment->setPlaceholderText("Write a comment…"); comment->setMaximumHeight(120); v->addWidget(comment);
     auto *save = new QPushButton("Save rating & comment"); save->setProperty("class", "primary"); v->addWidget(save);
+    auto *deleteMine = new QPushButton("Delete my rating & comment"); deleteMine->setEnabled(false); v->addWidget(deleteMine);
     auto *comments = new QTextBrowser; v->addWidget(comments, 1);
-    auto load = [this, &dlg, lecture, summary, like, rating, comment, comments]() {
+
+    // Any failed request (network error, backend down/asleep, bad
+    // input, etc.) used to fail completely silently — the button just
+    // looked like it did nothing. Surface it instead.
+    auto reportIfFailed = [&dlg](QNetworkReply *r, const QJsonObject &o) -> bool {
+        if (r->error() != QNetworkReply::NoError) {
+            QMessageBox::warning(&dlg, "Couldn't reach server",
+                "Request failed: " + r->errorString() +
+                "\n\nIf the backend was idle it can take up to a minute to wake up — please try again.");
+            return true;
+        }
+        if (o.contains("error")) {
+            QMessageBox::warning(&dlg, "Request failed", o.value("error").toString());
+            return true;
+        }
+        return false;
+    };
+
+    auto load = [this, &dlg, lecture, summary, like, rating, comment, comments, deleteMine]() {
         QUrl url(PAYMENTS_BACKEND_URL + "/api/ratings/" + QUrl::toPercentEncoding(lecture.path)); QUrlQuery q; q.addQueryItem("email", currentUserEmail); url.setQuery(q);
         auto *r = networkManager->get(QNetworkRequest(url));
-        connect(r, &QNetworkReply::finished, &dlg, [r, summary, like, rating, comment, comments] {
+        connect(r, &QNetworkReply::finished, &dlg, [this, r, &dlg, summary, like, rating, comment, comments, deleteMine] {
+            if (r->error() != QNetworkReply::NoError) {
+                summary->setText("Couldn't load rating (" + r->errorString() + ")");
+                r->deleteLater();
+                return;
+            }
             auto o=QJsonDocument::fromJson(r->readAll()).object(); r->deleteLater();
             summary->setText(QString("Average: ★ %1 / 5   •   %2 ratings   •   %3 likes").arg(o.value("average").toDouble(),0,'f',1).arg(o.value("count").toInt()).arg(o.value("likes").toInt()));
             like->setText(o.value("liked").toBool() ? "♥ Liked" : "♡ Like");
             int my=o.value("myRating").toInt(); if(my>=1&&my<=5) rating->setCurrentText(QString::number(my));
+            comment->setPlainText(o.value("myComment").toString());
+            deleteMine->setEnabled(my>=1);
             const auto arr=o.value("comments").toArray(); QString html;
-            for(const auto &x:arr){auto c=x.toObject(); html += QString("<b>%1</b>  ★ %2<br>%3<hr>").arg(c.value("name").toString().toHtmlEscaped()).arg(c.value("rating").toInt()).arg(c.value("comment").toString().toHtmlEscaped());}
+            for(const auto &x:arr){
+                auto c=x.toObject();
+                bool mine = c.value("mine").toBool();
+                html += QString("<b>%1</b>%2  ★ %3<br>%4<hr>")
+                            .arg(c.value("name").toString().toHtmlEscaped())
+                            .arg(mine ? " <i>(you)</i>" : "")
+                            .arg(c.value("rating").toInt())
+                            .arg(c.value("comment").toString().toHtmlEscaped());
+            }
             comments->setHtml(html.isEmpty()?"No comments yet.":html);
-            // The current comment is not returned separately, so leave the editor intact.
         });
     };
-    connect(like, &QPushButton::clicked, &dlg, [this, lecture, load, like] {
+    connect(like, &QPushButton::clicked, &dlg, [this, lecture, load, like, reportIfFailed] {
         QNetworkRequest req(QUrl(PAYMENTS_BACKEND_URL+"/api/ratings/like")); req.setHeader(QNetworkRequest::ContentTypeHeader,"application/json");
         QJsonObject b; b["itemId"]=lecture.path; b["userEmail"]=currentUserEmail; b["userName"]=currentUserName;
-        auto *r=networkManager->post(req,QJsonDocument(b).toJson(QJsonDocument::Compact)); connect(r,&QNetworkReply::finished,r,[r,load]{r->deleteLater();load();});
+        auto *r=networkManager->post(req,QJsonDocument(b).toJson(QJsonDocument::Compact));
+        connect(r,&QNetworkReply::finished,r,[r,load,reportIfFailed]{
+            auto o=QJsonDocument::fromJson(r->readAll()).object();
+            bool failed = reportIfFailed(r, o);
+            r->deleteLater();
+            if (!failed) load();
+        });
     });
-    connect(save, &QPushButton::clicked, &dlg, [this, lecture, rating, comment, load] {
+    connect(save, &QPushButton::clicked, &dlg, [this, lecture, rating, comment, load, reportIfFailed] {
         QNetworkRequest req(QUrl(PAYMENTS_BACKEND_URL+"/api/ratings")); req.setHeader(QNetworkRequest::ContentTypeHeader,"application/json");
         QJsonObject b; b["itemId"]=lecture.path; b["userEmail"]=currentUserEmail; b["userName"]=currentUserName; b["rating"]=rating->currentText().toInt(); b["comment"]=comment->toPlainText();
-        auto *r=networkManager->post(req,QJsonDocument(b).toJson(QJsonDocument::Compact)); connect(r,&QNetworkReply::finished,r,[r,load]{r->deleteLater();load();});
+        auto *r=networkManager->post(req,QJsonDocument(b).toJson(QJsonDocument::Compact));
+        connect(r,&QNetworkReply::finished,r,[r,load,reportIfFailed]{
+            auto o=QJsonDocument::fromJson(r->readAll()).object();
+            bool failed = reportIfFailed(r, o);
+            r->deleteLater();
+            if (!failed) load();
+        });
+    });
+    connect(deleteMine, &QPushButton::clicked, &dlg, [this, lecture, load, comment, &dlg, reportIfFailed] {
+        if (QMessageBox::question(&dlg, "Delete comment", "Remove your rating and comment on this item?") != QMessageBox::Yes) return;
+        QNetworkRequest req(QUrl(PAYMENTS_BACKEND_URL+"/api/ratings/delete")); req.setHeader(QNetworkRequest::ContentTypeHeader,"application/json");
+        QJsonObject b; b["itemId"]=lecture.path; b["userEmail"]=currentUserEmail;
+        auto *r=networkManager->post(req,QJsonDocument(b).toJson(QJsonDocument::Compact));
+        connect(r,&QNetworkReply::finished,r,[r,load,comment,reportIfFailed]{
+            auto o=QJsonDocument::fromJson(r->readAll()).object();
+            bool failed = reportIfFailed(r, o);
+            r->deleteLater();
+            if (!failed) { comment->clear(); load(); }
+        });
     });
     load(); dlg.exec();
 }
