@@ -36,6 +36,7 @@ private:
         QString category;
         QString path;
         bool free = true;
+        double price = 0.0;
     };
 
 private slots:
