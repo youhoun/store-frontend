@@ -60,13 +60,11 @@ const QString LINE = "#E3DAC4";
 const QString SAFFRON = "#E4A335";
 const QString TEAL = "#2F7A6F";
 
-// Paste the OAuth 2.0 Client ID from Google Cloud here.
-// Create it as an application type: Desktop app.
 const QString GOOGLE_CLIENT_ID =
-    "......";
+    "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com";
 
 const QString GOOGLE_CLIENT_SECRET =
-    "GOCSPX-......";
+    "YOUR_GOOGLE_CLIENT_SECRET";
 
 // URL of the small backend that holds the Tola Saint secret key and
 // creates/checks payments on our behalf. Point this at your deployed
@@ -185,6 +183,25 @@ void MainWindow::loadData()
         "paid/ReactJS - CodeKhmerLearning.pdf"
     };
 
+    // Per-lecture prices, for display only — the backend (server.js
+    // LECTURE_PRICES) is the source of truth and re-checks the amount
+    // itself, so this map just needs to stay in sync for the UI to
+    // show the correct number.
+    static const QMap<QString, double> lecturePrices = {
+        {"paid/Python Programming - CodeKhmerLearning.pdf", 0.03},
+        {"paid/c_programming.pdf", 0.04},
+        {"paid/Git Notes for Professionals.pdf", 0.05},
+        {"paid/Linux commands Notes for Professionals.pdf", 0.06},
+        {"paid/PHP Notes for Professionals.pdf", 0.07},
+        {"paid/Node.js Notes for Professionals.pdf", 0.08},
+        {"paid/JavaScript - CodeKhmerLearning.pdf", 0.09},
+        {"paid/Learning MongoDB.pdf", 0.10},
+        {"paid/PostgreSQL Notes for Professionals.pdf", 0.11},
+        {"paid/Robotics, AI, and Humanity.pdf", 0.12},
+        {"paid/PHP - CodeKhmerLearning.pdf", 0.13},
+        {"paid/ReactJS - CodeKhmerLearning.pdf", 0.14},
+    };
+
     auto addLectures = [this](const QStringList &items, bool isFree) {
 
         for (const QString &path : items) {
@@ -193,6 +210,7 @@ void MainWindow::loadData()
 
             l.path = path;
             l.free = isFree;
+            l.price = isFree ? 0.0 : lecturePrices.value(path, 0.03);
 
             const QString file =
                 QFileInfo(path).completeBaseName();
@@ -227,7 +245,8 @@ void MainWindow::loadData()
             const QString type = o.value("type").toString();
             if (type == "lecture") {
                 Lecture l; l.path=o.value("path").toString(); l.title=o.value("title").toString();
-                l.teacher=o.value("author").toString(); l.category=o.value("category").toString(); l.free=o.value("price").toDouble()<=0;
+                l.teacher=o.value("author").toString(); l.category=o.value("category").toString();
+                l.price=o.value("price").toDouble(); l.free=l.price<=0;
                 if (!l.path.isEmpty() && !l.title.isEmpty()) lectures.append(l);
             } else {
                 Book b; b.id=o.value("id").toString(); b.title=o.value("title").toString(); b.author=o.value("author").toString();
@@ -555,7 +574,7 @@ QWidget *MainWindow::makeLecturesPage()
     layout->addWidget(title);
 
     auto *sub = new QLabel(
-        "Programming lectures and study materials — $0.03 per lecture."
+        "Programming lectures and study materials — priced individually."
         );
     sub->setObjectName("muted");
     layout->addWidget(sub);
@@ -620,7 +639,7 @@ QWidget *MainWindow::lectureCard(const Lecture &lecture)
             QString("font-weight:700;color:%1;").arg(TEAL)
             );
     } else {
-        icon->setText("🔒  PAID • $0.03");
+        icon->setText(QString("🔒  PAID • $%1").arg(lecture.price, 0, 'f', 2));
         icon->setStyleSheet(
             "font-weight:700;color:#B87F1F;"
             );
@@ -661,7 +680,7 @@ QWidget *MainWindow::lectureCard(const Lecture &lecture)
         button->setText("Read");
         button->setProperty("class", "teal");
     } else {
-        button->setText("Buy • $0.03");
+        button->setText(QString("Buy • $%1").arg(lecture.price, 0, 'f', 2));
         button->setProperty("class", "primary");
     }
 
@@ -845,8 +864,8 @@ void MainWindow::showLectureRatingDialog(const Lecture &lecture)
     auto reportIfFailed = [&dlg](QNetworkReply *r, const QJsonObject &o) -> bool {
         if (r->error() != QNetworkReply::NoError) {
             QMessageBox::warning(&dlg, "Couldn't reach server",
-                "Request failed: " + r->errorString() +
-                "\n\nIf the backend was idle it can take up to a minute to wake up — please try again.");
+                                 "Request failed: " + r->errorString() +
+                                     "\n\nIf the backend was idle it can take up to a minute to wake up — please try again.");
             return true;
         }
         if (o.contains("error")) {
@@ -1069,7 +1088,7 @@ void MainWindow::startLecturePayment(const Lecture &lecture)
     cv->addSpacing(4);
 
     auto *amountRow = new QHBoxLayout;
-    auto *amount = new QLabel("0.03");
+    auto *amount = new QLabel(QString::number(lecture.price, 'f', 2));
     amount->setStyleSheet(
         "color:#233046; font-size:26px; font-weight:800;"
         );
